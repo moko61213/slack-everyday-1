@@ -1,0 +1,22 @@
+name: 毎日投稿
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # UTC 0:00 → JST 9:00
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run post script
+        run: python post_message.py
