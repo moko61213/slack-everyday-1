@@ -132,16 +132,17 @@ def handle_command(text, channel):
 
 
 @socket_client.socket_mode_request_listeners.append
-def handle_events(payload: SocketModeRequest):
-    logging.debug(f"イベント受信: type={payload.type}")
-    try:
-        if payload.type == "events_api":
-            event = payload.payload.get("event", {})
-            if event.get("type") == "message" and "bot_id" not in event:
-                handle_command(event.get("text", ""), event.get("channel"))
-            socket_client.send_socket_mode_response(SocketModeResponse(envelope_id=payload.envelope_id))
-    except Exception as e:
-        logging.error(f"イベント処理中に例外発生: {e}")
+def handle_events(client: SocketModeClient, req: SocketModeRequest):
+    logging.info(f"イベント受信タイプ: {req.type}")
+    logging.info(f"ペイロード内容: {json.dumps(req.payload, ensure_ascii=False, indent=2)}")
+
+    if req.type == "events_api":
+        event = req.payload.get("event", {})
+        if event.get("type") == "message" and "bot_id" not in event:
+            handle_command(event.get("text", ""), event.get("channel"))
+        # イベントの処理完了をSlackへ通知
+        client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+
 
 
 def main_loop():
