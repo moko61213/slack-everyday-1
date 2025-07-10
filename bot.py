@@ -2,6 +2,9 @@ import os
 import json
 import re
 import logging
+import time
+import datetime
+import threading
 from slack_sdk import WebClient
 from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
@@ -18,6 +21,7 @@ socket_client = SocketModeClient(app_token=APP_LEVEL_TOKEN, web_client=client)
 
 CONFIG_FILE = "daily_post.json"
 TEMP_FILE = "daily_post_temp.json"
+last_posted_date = None
 
 def save_temp(data):
     with open(TEMP_FILE, "w", encoding="utf-8") as f:
@@ -41,15 +45,19 @@ def clear_config():
     if os.path.exists(CONFIG_FILE):
         os.remove(CONFIG_FILE)
 
+def load_config():
+    if not os.path.exists(CONFIG_FILE):
+        return None
+    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
 def extract_channel_id(text: str) -> str | None:
-    """<#C12345|channel-name> の形式からIDを抽出"""
     m = re.search(r"<#([A-Z0-9]+)(\|[^>]*)?>", text)
     if m:
         return m.group(1)
     return None
 
 def get_channel_id(channel_name: str) -> str | None:
-    """チャンネル名(#なし)からチャンネルIDを取得"""
     if channel_name.startswith("#"):
         channel_name = channel_name[1:]
     try:
@@ -74,18 +82,16 @@ def handle_command(text: str, event_channel: str):
             return
 
         time_str, channel_input = parts[1], parts[2].strip()
-
         channel_id = extract_channel_id(channel_input)
         if not channel_id:
-            # ID形式でなければ名前で取得
             if channel_input.startswith("#"):
                 channel_id = get_channel_id(channel_input[1:])
             else:
-                client.chat_postMessage(channel=event_channel, text="❌ チャンネル指定が不正です。`#channel` またはチャンネルメンション形式で指定してください。")
+                client.chat_postMessage(channel=event_channel, text="❌ チャンネル指定が不正です。")
                 return
 
         if not channel_id:
-            client.chat_postMessage(channel=event_channel, text=f"❌ チャンネル `{channel_input}` が見つかりません。Botが参加しているか確認してください。")
+            client.chat_postMessage(channel=event_channel, text=f"❌ チャンネル `{channel_input}` が見つかりません。")
             return
 
         save_temp({"time": time_str, "channel_id": channel_id})
@@ -125,11 +131,40 @@ def handle_events(client: SocketModeClient, req: SocketModeRequest):
             handle_command(event.get("text", ""), event.get("channel"))
         client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
+def check_and_post():
+    global last_posted_date
+
+    config = load_config()
+    if not config:
+        return
+
+    now = datetime.datetime.now()
+    current_time = now.strftime("%H:%M")
+
+    if last_posted_date != now.date() and current_time == config["time"]:
+        try:
+            client.chat_postMessage(
+                channel=config["channel_id"],
+                text=config["message"]
+            )
+            last_posted_date = now.date()
+            logging.info(f"✅ 投稿完了: {now}")
+        except Exception as e:
+            logging.error(f"投稿エラー: {e}")
+
+def start_posting_loop():
+    def loop():
+        while True:
+            check_and_post()
+            time.sleep(30)
+    t = threading.Thread(target=loop)
+    t.daemon = True
+    t.start()
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     socket_client.connect()
+    start_posting_loop()
     print("Bot 起動中...")
-    import time
     while True:
         time.sleep(1)
-
